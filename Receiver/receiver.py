@@ -31,6 +31,24 @@ Text_Queue = []
 Queue = []
 
 
+CORE_PORTNUMS = {
+    'TEXT_MESSAGE_APP',
+    'TEXT_MESSAGE_COMPRESSED_APP',
+    'POSITION_APP',
+    'NODEINFO_APP',
+    'ROUTING_APP',
+    'TELEMETRY_APP',
+    'ADMIN_APP',
+    'ALERT_APP',
+    'KEY_VERIFICATION_APP',
+    'WAYPOINT_APP',
+    'STORE_FORWARD_APP',
+    'TRACEROUTE_APP',
+}
+
+TRANSFER_PORT_NAME = 'TEXT_MESSAGE_APP'
+
+
 def main(interface):
     args = parser.parse_args()
     # Args to be used
@@ -77,9 +95,11 @@ def on_receive(packet, interface): # called when a packet arrives
         packet.get('fromId'),
         interface.getShortName(),
     )
-    if packet['decoded']['portnum'] == 'IP_TUNNEL_APP':
+    decoded = packet.get('decoded', {})
+    portnum = decoded.get('portnum')
+    if portnum == TRANSFER_PORT_NAME and 'payload' in decoded:
         Queue.append((interface.getShortName(), packet))
-    elif packet['decoded']['portnum'] == 'TEXT_MESSAGE_APP':
+    elif portnum in CORE_PORTNUMS and 'text' in decoded:
         Text_Queue.append((interface.getShortName(), packet))
 
 
