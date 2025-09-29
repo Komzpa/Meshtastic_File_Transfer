@@ -336,6 +336,44 @@ def test_transfer_completes_with_link_delay(tmp_path):
     assert source_path.read_bytes() == payload
 
 
+def test_sender_expands_retry_timeout_for_slow_ack(tmp_path):
+    def slow_ack_hook(src, dest, data):
+        if src == "sender" and dest == "receiver" and not data.startswith(b"fcom"):
+            return {"delay": 0.5}
+        if src == "receiver" and dest == "sender" and data.startswith(b"fcom"):
+            return {"delay": 8.0}
+        return {}
+
+    payload, fake_time, network, sender_iface, receiver_node, source_path, _send_delay = build_transfer(
+        tmp_path, packet_len=60, send_delay=0.5, data_hook=slow_ack_hook
+    )
+
+    with patch("file_classes.time", fake_time), patch("file_classes.tqdm.tqdm", DummyProgressBar):
+        sender = file_classes.FileTransferSender(
+            str(source_path),
+            99,
+            sender_iface,
+            "receiver",
+            send_delay=0.5,
+            packet_len=60,
+            disable_bar=True,
+        )
+        network.register(
+            "sender",
+            on_data=lambda data, _src: sender.manage_com_packet(bytearray(data)),
+        )
+        run_transfer(sender, receiver_node, network, fake_time, step=0.5, max_steps=6000)
+
+    assert sender.finished, "Sender should finish transfer despite slow acknowledgements"
+    assert (
+        receiver_node.receiver is not None and receiver_node.receiver.finished
+    ), "Receiver should finish transfer despite slow acknowledgements"
+    assert source_path.read_bytes() == payload, "Transferred payload should match original data"
+    assert (
+        sender.retry_timeout >= 8.0
+    ), f"Retry timeout should adapt to slow RTT, got {sender.retry_timeout}"
+
+
 def test_manager_handles_initial_request_in_payload():
     interface = DummyInterface()
     manager = FileTransManager(interface, auto_restart=True)

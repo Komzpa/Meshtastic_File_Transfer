@@ -6,7 +6,10 @@ import sys
 from types import SimpleNamespace
 import time
 from pathlib import Path
-from typing import Dict, Iterable, List, MutableMapping, Sequence, Set
+
+from typing import Dict, Iterable, List, MutableMapping, Optional, Sequence, Set
+
+import tqdm
 from meshtastic import portnums_pb2
 
 import Packaging_Data
@@ -337,6 +340,10 @@ class FileTransferSender:
             default_status="pending",
             disable=self.disable_bar,
         )
+        self._min_retry_timeout = max(self.delay * 2, 3)
+        self._max_retry_timeout = 300.0
+        self.retry_timeout = self._min_retry_timeout
+        self._smoothed_rtt: Optional[float] = None
         self.send_initial()
 
     def send_initial(self) -> None:
@@ -427,11 +434,16 @@ class FileTransferSender:
             self.kill = True
         elif packet_type == 5:
             acknowledged = list(packet[6:])
+            now = time.time()
             for num in acknowledged:
-                self.pending_packets.pop(num, None)
+                sent_time = self.pending_packets.pop(num, None)
                 if num not in self.acknowledged_packets and num < self.packet_num:
                     self.acknowledged_packets.add(num)
                     self.progress_display.set_status(num, "acknowledged")
+
+                if sent_time is not None:
+                    rtt = max(0.0, now - sent_time)
+                    self._update_retry_timeout(rtt)
             LOGGER.debug("Acknowledged packets for %s: %s", self.name, acknowledged)
             if self.mode == 0:
                 self.mode = 2
@@ -456,8 +468,10 @@ class FileTransferSender:
 
     def _retry_pending(self, now: float) -> None:
         for packet_index, timestamp in list(self.pending_packets.items()):
-            if now - timestamp > self.retry_timeout:
+            elapsed = now - timestamp
+            if elapsed > self.retry_timeout:
                 self.pending_packets.pop(packet_index, None)
+                self._backoff_retry_timeout(elapsed)
                 if packet_index not in self.to_send:
                     self.to_send.append(packet_index)
                 self.progress_display.set_status(packet_index, "awaiting_retry")
@@ -506,3 +520,40 @@ class FileTransferSender:
             print(f"Failed to send completion notice for {self.name}: {exc}")
             LOGGER.exception("Failed to send completion notice for %s (%s): %s", self.name, self.id, exc)
             self.finish_sent = False
+
+    def _backoff_retry_timeout(self, elapsed: float) -> None:
+        """Increase ``retry_timeout`` to better match the observed network delay."""
+
+        proposed = max(self.retry_timeout * 1.5, elapsed * 2, self._min_retry_timeout)
+        if proposed > self.retry_timeout:
+            self.retry_timeout = min(proposed, self._max_retry_timeout)
+            LOGGER.debug(
+                "Retry timeout for %s increased to %.2fs after %.2fs elapsed",
+                self.name,
+                self.retry_timeout,
+                elapsed,
+            )
+
+    def _update_retry_timeout(self, observed_rtt: float) -> None:
+        """Adapt ``retry_timeout`` based on an ``observed_rtt`` sample."""
+
+        if observed_rtt <= 0:
+            return
+        if self._smoothed_rtt is None:
+            self._smoothed_rtt = observed_rtt
+        else:
+            alpha = 0.2
+            self._smoothed_rtt = (1 - alpha) * self._smoothed_rtt + alpha * observed_rtt
+
+        target = max(self._min_retry_timeout, self._smoothed_rtt * 2.5, observed_rtt * 2.5)
+        capped = min(target, self._max_retry_timeout)
+        if capped < self.retry_timeout:
+            self.retry_timeout = max(capped, self._min_retry_timeout)
+        else:
+            self.retry_timeout = capped
+        LOGGER.debug(
+            "Retry timeout for %s adjusted to %.2fs based on RTT %.2fs",
+            self.name,
+            self.retry_timeout,
+            observed_rtt,
+        )
