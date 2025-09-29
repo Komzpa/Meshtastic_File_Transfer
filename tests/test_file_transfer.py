@@ -60,7 +60,7 @@ class FakeInterface:
         del portNum, wantAck  # Unused in tests
         self.network.send_data(self.node_id, destinationId, data)
 
-    def sendText(self, text, destinationId):
+    def sendText(self, text, destinationId, wantAck=False):
         self.sent_texts.append((destinationId, text))
         self.network.send_text(self.node_id, destinationId, text)
 
