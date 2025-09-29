@@ -54,12 +54,14 @@ class FakeInterface:
     def __init__(self, node_id, network):
         self.node_id = node_id
         self.network = network
+        self.sent_texts = []
 
     def sendData(self, data, destinationId, portNum=None, wantAck=False):
         del portNum, wantAck  # Unused in tests
         self.network.send_data(self.node_id, destinationId, data)
 
     def sendText(self, text, destinationId):
+        self.sent_texts.append((destinationId, text))
         self.network.send_text(self.node_id, destinationId, text)
 
 
@@ -188,6 +190,27 @@ def test_transfer_completes_on_open_channel(tmp_path):
     assert sender.finished
     assert receiver_node.receiver is not None and receiver_node.receiver.finished
     assert source_path.read_bytes() == payload
+
+
+def test_initial_request_uses_basename(tmp_path):
+    _payload, fake_time, network, sender_iface, _receiver_node, source_path, send_delay = build_transfer(
+        tmp_path, packet_len=64, send_delay=0.1
+    )
+
+    with patch("file_classes.time", fake_time), patch("file_classes.tqdm.tqdm", DummyProgressBar):
+        file_classes.FileTransferSender(
+            str(source_path),
+            7,
+            sender_iface,
+            "receiver",
+            send_delay=send_delay,
+            packet_len=64,
+            disable_bar=True,
+        )
+
+    assert sender_iface.sent_texts, "no initial request was sent"
+    _dest, message = sender_iface.sent_texts[0]
+    assert f"!fcom,file:{source_path.name}," in message
 
 
 def test_transfer_handles_out_of_order_delivery(tmp_path):

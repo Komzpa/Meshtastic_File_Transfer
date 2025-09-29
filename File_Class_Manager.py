@@ -74,7 +74,7 @@ class FileTransManager:
         file_id = random.randint(0, 256)
         while file_id == bytearray('f'.encode('utf8'))[0] or file_id in self.transfer_objects.keys():
             file_id = random.randint(0, 256)
-        print(f'Sending {file_name}...')
+        print(f'Sending {os.path.basename(file_name) or file_name}...')
         self.transfer_objects[file_id] = file_classes.FileTransferSender(file_name, file_id, self.interface,
                                                                          destination, self.send_delay, self.packet_len,
                                                                          disable_bar=False)

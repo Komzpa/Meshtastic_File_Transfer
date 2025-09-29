@@ -111,6 +111,7 @@ class FileTransferSender:
     def __init__(self, file_name, file_id: int, interface, destination_id, send_delay=10, packet_len=200,
                  disable_bar=True):
         self.name = file_name
+        self.display_name = os.path.basename(file_name) or file_name
         self.id = file_id  # 0 Reserved for file meta packets
         self.interface = interface
         self.destination_id = destination_id
@@ -138,7 +139,7 @@ class FileTransferSender:
 
     def send_initial(self):
         # Sends initial packet
-        init_str = Packaging_Data.make_initial_req(self.name, len(self.data_dict), self.id)
+        init_str = Packaging_Data.make_initial_req(self.display_name, len(self.data_dict), self.id)
         try:
             self.interface.sendText(init_str, destinationId=self.destination_id)
             self.last_activity = time.time()
