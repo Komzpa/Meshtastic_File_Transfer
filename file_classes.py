@@ -118,9 +118,9 @@ class ChunkProgressDisplay:
 
 # File transfer traffic historically reused the text message port. Recent
 # Meshtastic firmware started strictly decoding that port as UTF-8 which breaks
-# our binary payloads.  Use the waypoint application port instead so the stack
-# will forward the bytes untouched.
-TRANSFER_PORTNUM = portnums_pb2.WAYPOINT_APP
+# our binary payloads.  Use a generic application port that Meshtastic leaves
+# undecoded so the stack forwards the bytes untouched.
+TRANSFER_PORTNUM = portnums_pb2.PRIVATE_APP
 
 RECEIVER_STATUS_CHARS = {
     "waiting": ".",

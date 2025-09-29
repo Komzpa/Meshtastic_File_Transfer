@@ -20,6 +20,7 @@ if "meshtastic" not in sys.modules:
     portnums_module.ALERT_APP = 8
     portnums_module.KEY_VERIFICATION_APP = 9
     portnums_module.WAYPOINT_APP = 10
+    portnums_module.PRIVATE_APP = 13
     portnums_module.STORE_FORWARD_APP = 11
     portnums_module.TRACEROUTE_APP = 12
     meshtastic_module.portnums_pb2 = portnums_module
@@ -217,7 +218,7 @@ def test_transfer_completes_on_open_channel(tmp_path):
     assert receiver_node.receiver is not None and receiver_node.receiver.finished
     assert source_path.read_bytes() == payload
     assert all(
-        portNum == portnums_pb2.WAYPOINT_APP for _dest, _data, portNum, _wantAck in sender_iface.sent_data
+        portNum == portnums_pb2.PRIVATE_APP for _dest, _data, portNum, _wantAck in sender_iface.sent_data
     )
 
 
