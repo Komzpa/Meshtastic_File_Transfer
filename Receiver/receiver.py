@@ -83,7 +83,12 @@ if __name__ == '__main__':
         prog='Meshtastic File Receiver',
         description='Reveives a file or directory to another node running the receiver program',)
     parser.add_argument('-t', '--time_out', default=300, help='Time between packets before giving up')
-    parser.add_argument('-a', '--auto_accept', default=False, help='Automatically accepts file transfers')
+    parser.add_argument(
+        '-a',
+        '--auto_accept',
+        action='store_true',
+        help='Automatically accepts file transfers',
+    )
     ports = findPorts(True)
     print(f'Number of Radios: {len(ports)}')
     interface = None
