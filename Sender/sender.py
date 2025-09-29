@@ -96,8 +96,7 @@ def main(interface):
             if Text_Queue:  # handle text data
                 name, packet = Text_Queue.pop(0)
                 text = packet['decoded']['text']
-                print(f'Text Received: {text}')
-                LOGGER.debug('Received text from %s: %s', name, text)
+                LOGGER.info('Text received from %s: %s', name, text)
 
             if len(manager.transfer_objects) == 0:
                 looping = False
