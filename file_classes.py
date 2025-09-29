@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
+from types import SimpleNamespace
 import time
 from pathlib import Path
+
 from typing import Dict, Iterable, List, MutableMapping, Optional, Sequence, Set
 
 import tqdm
@@ -13,9 +16,128 @@ import Packaging_Data
 
 LOGGER = logging.getLogger(__name__)
 
+
+class ChunkProgressDisplay:
+    """Render a chunk-by-chunk status view for transfers."""
+
+    def __init__(
+        self,
+        total: int,
+        label: str,
+        char_map: MutableMapping[str, str],
+        default_status: str,
+        disable: bool = False,
+    ) -> None:
+        # Store the configuration used to render the progress output.
+        self.enabled = not disable and total > 0
+        self.label = label
+        self.char_map = dict(char_map)
+        self.default_status = default_status
+        self.total = total
+        self.statuses: List[str] = [default_status for _ in range(total)]
+        self._last_width = 0
+        self._rendered_once = False
+        self.closed = False
+        # Failing fast makes invalid configuration easier to diagnose.
+        if self.enabled and default_status not in self.char_map:
+            raise ValueError(f"Unknown default status '{default_status}' for {label}")
+        if self.enabled:
+            # Provide a legend so users can interpret the characters at a glance.
+            legend = ", ".join(
+                f"{symbol}={status.replace('_', ' ')}"
+                for status, symbol in self.char_map.items()
+            )
+            if legend:
+                print(f"{self.label} legend -> {legend}")
+            # Render the initial empty progress view.
+            self._render(initial=True)
+
+    def _apply_status(self, index: int, status: str) -> bool:
+        if status not in self.char_map or not 0 <= index < self.total:
+            return False
+        if self.statuses[index] == status:
+            return False
+        self.statuses[index] = status
+        return True
+
+    def set_status(self, index: int, status: str) -> None:
+        """Set the status for a single chunk and refresh the view."""
+
+        if not self.enabled or self.closed:
+            return
+        if self._apply_status(index, status):
+            self._render()
+
+    def set_many(self, indices: Iterable[int], status: str) -> None:
+        """Set the status for multiple chunks in one render."""
+
+        if not self.enabled or self.closed:
+            return
+        updated = False
+        for index in indices:
+            updated = self._apply_status(index, status) or updated
+        if updated:
+            self._render()
+
+    def set_all(self, status: str) -> None:
+        """Set the status for every chunk."""
+
+        if not self.enabled or self.closed or status not in self.char_map:
+            return
+        if all(current == status for current in self.statuses):
+            return
+        self.statuses = [status for _ in range(self.total)]
+        self._render()
+
+    def _render(self, initial: bool = False) -> None:
+        if not self.enabled or self.closed:
+            return
+        # Build the textual progress line using the configured characters.
+        progress = "".join(self.char_map.get(status, "?") for status in self.statuses)
+        line = f"{self.label}: {progress}"
+        prefix = "" if initial and not self._rendered_once else "\r"
+        sys.stdout.write(prefix + line)
+        if len(line) < self._last_width:
+            sys.stdout.write(" " * (self._last_width - len(line)))
+        sys.stdout.flush()
+        self._last_width = len(line)
+        self._rendered_once = True
+
+    def close(self, final_status: str | None = None) -> None:
+        """Finalize the display and move to the next terminal line."""
+
+        if not self.enabled or self.closed:
+            return
+        # Optionally normalise the final state before printing a newline.
+        if final_status is not None and final_status in self.char_map:
+            self.statuses = [final_status for _ in range(self.total)]
+        self._render()
+        sys.stdout.write("\n")
+        sys.stdout.flush()
+        self.closed = True
+
 # File transfer traffic now uses the same core port number as the initial
 # request message so radios treat the packets as standard application data.
 TRANSFER_PORTNUM = portnums_pb2.TEXT_MESSAGE_APP
+
+RECEIVER_STATUS_CHARS = {
+    "waiting": ".",
+    "received": "#",
+    "stored": "*",
+    "missing": "!",
+    "failed": "x",
+}
+
+SENDER_STATUS_CHARS = {
+    "pending": ".",
+    "in_flight": ">",
+    "awaiting_retry": "!",
+    "acknowledged": "#",
+    "failed": "x",
+}
+
+# Maintain a ``tqdm`` attribute for compatibility with existing tests.
+tqdm = SimpleNamespace(tqdm=ChunkProgressDisplay)
 
 
 class FileTransferReceiver:
@@ -39,7 +161,13 @@ class FileTransferReceiver:
         self.packet_dict: Dict[int, bytes] = {}
         self.timeout = timeout + 10
         self.last_packet = time.time()
-        self.progress_bar = tqdm.tqdm(total=num_packets, unit="packet", disable=disable_bar)
+        self.progress_display = ChunkProgressDisplay(
+            num_packets,
+            label=f"Receiving {self.name}",
+            char_map=RECEIVER_STATUS_CHARS,
+            default_status="waiting",
+            disable=disable_bar,
+        )
         self.retry_interval = max(5, min(self.timeout / 2, 60))
         self.last_control_sent = 0.0
         self.kill = False
@@ -55,12 +183,12 @@ class FileTransferReceiver:
             if self.get_missing_nums():
                 print(f'File Transfer "{self.name}" Failed')
                 LOGGER.error("Transfer %s (%s) timed out", self.name, self.id)
-                self.progress_bar.close()
+                self.progress_display.set_many(self.get_missing_nums(), "missing")
+                self.progress_display.close()
                 self.kill = True
             else:
                 self.save_to_file()
                 self.kill = True
-                self.progress_bar.close()
         elif not self.packet_dict and now - self.last_control_sent > self.retry_interval:
             LOGGER.warning(
                 "No packets received yet for %s (%s), resending initial acknowledgement",
@@ -93,7 +221,7 @@ class FileTransferReceiver:
         ack_packet = Packaging_Data.make_status_packet(self.id, 5, opt_data=[packet_index])
         self._send_control_packet(ack_packet, description=f"ack #{packet_index}")
         if is_new_packet:
-            self.progress_bar.update(1)
+            self.progress_display.set_status(packet_index, "received")
             if len(self.packet_dict) == self.num_packets:
                 self.save_to_file()
         return True
@@ -108,6 +236,7 @@ class FileTransferReceiver:
             if missing_packets:
                 LOGGER.info("Transfer %s (%s) missing packets: %s", self.name, self.id, missing_packets)
                 ret_packet = Packaging_Data.make_status_packet(self.id, 3, opt_data=missing_packets)
+                self.progress_display.set_many(missing_packets, "missing")
             else:
                 ret_packet = Packaging_Data.make_status_packet(self.id, 4)
                 self.save_to_file()
@@ -126,12 +255,13 @@ class FileTransferReceiver:
             return False
 
         try:
-            self.progress_bar.close()
             path = Path(self.name)
             path.parent.mkdir(parents=True, exist_ok=True)
             with path.open("wb") as destination:
                 for index in range(self.num_packets):
                     destination.write(self.packet_dict[index])
+            self.progress_display.set_all("stored")
+            self.progress_display.close()
             self.finished = True
             self.saved = True
             LOGGER.info("Saved file %s (%s packets)", self.name, self.num_packets)
@@ -139,6 +269,7 @@ class FileTransferReceiver:
             print(f"Failed to save {self.name}: {exc}")
             LOGGER.exception("Failed to save %s: %s", self.name, exc)
             self.kill = True
+            self.progress_display.close(final_status="failed")
             return False
         return True
 
@@ -202,7 +333,13 @@ class FileTransferSender:
         self.acknowledged_packets: Set[int] = set()
         self.finish_sent = False
         self.disable_bar = disable_bar
-        self.progress_bar = tqdm.tqdm(total=self.packet_num, unit="packet", disable=self.disable_bar)
+        self.progress_display = ChunkProgressDisplay(
+            self.packet_num,
+            label=f"Sending {self.display_name}",
+            char_map=SENDER_STATUS_CHARS,
+            default_status="pending",
+            disable=self.disable_bar,
+        )
         self._min_retry_timeout = max(self.delay * 2, 3)
         self._max_retry_timeout = 300.0
         self.retry_timeout = self._min_retry_timeout
@@ -225,6 +362,7 @@ class FileTransferSender:
             print(f"Failed to send initial request for {self.name}: {exc}")
             LOGGER.exception("Failed to send initial request for %s (%s): %s", self.name, self.id, exc)
             self.kill = True
+            self.progress_display.close(final_status="failed")
 
     def update(self) -> None:
         """Advance the sender state machine and enforce retry logic."""
@@ -257,7 +395,7 @@ class FileTransferSender:
         if now - self.last_activity > self.retry_timeout * 4:
             print("failed Send Timeout - no activity detected")
             LOGGER.error("Send timeout for %s (%s)", self.name, self.id)
-            self.progress_bar.close()
+            self.progress_display.close(final_status="failed")
             self.kill = True
 
     def manage_com_packet(self, packet: bytearray) -> None:
@@ -269,7 +407,7 @@ class FileTransferSender:
         if packet_type == 0:
             print("Sending Denied")
             LOGGER.error("Transfer %s (%s) denied by receiver", self.name, self.id)
-            self.progress_bar.close()
+            self.progress_display.close(final_status="failed")
             self.kill = True
         elif packet_type == 1:
             if self.mode == 0:
@@ -283,12 +421,13 @@ class FileTransferSender:
                 self.acknowledged_packets.discard(num)
                 if num not in self.to_send and num in self.data_dict:
                     self.to_send.append(num)
+                self.progress_display.set_status(num, "awaiting_retry")
             self.finish_sent = False
             if self.mode != 2:
                 self.mode = 2
             LOGGER.info("Receiver requested retransmit of %s packets for %s", len(needed_packets), self.name)
         elif packet_type == 4:
-            self.progress_bar.close()
+            self.progress_display.close()
             print(f"Confirmed File Transfer #{self.id} Complete")
             LOGGER.info("Receiver confirmed completion of %s (%s)", self.name, self.id)
             self.finished = True
@@ -300,7 +439,8 @@ class FileTransferSender:
                 sent_time = self.pending_packets.pop(num, None)
                 if num not in self.acknowledged_packets and num < self.packet_num:
                     self.acknowledged_packets.add(num)
-                    self.progress_bar.update(1)
+                    self.progress_display.set_status(num, "acknowledged")
+
                 if sent_time is not None:
                     rtt = max(0.0, now - sent_time)
                     self._update_retry_timeout(rtt)
@@ -334,6 +474,7 @@ class FileTransferSender:
                 self._backoff_retry_timeout(elapsed)
                 if packet_index not in self.to_send:
                     self.to_send.append(packet_index)
+                self.progress_display.set_status(packet_index, "awaiting_retry")
                 LOGGER.warning("Packet #%s for %s timed out; rescheduling", packet_index, self.name)
 
     def _send_packet(self, packet_index: int) -> None:
@@ -352,12 +493,14 @@ class FileTransferSender:
             self.pending_packets[packet_index] = sent_time
             self.last_send = sent_time
             self.last_activity = sent_time
+            self.progress_display.set_status(packet_index, "in_flight")
             LOGGER.debug("Packet #%s queued for delivery (%s)", packet_index, self.name)
         except Exception as exc:  # pragma: no cover - interface errors are environment specific
             print(f"Failed to send packet {packet_index} for {self.name}: {exc}")
             LOGGER.exception("Failed to send packet #%s for %s: %s", packet_index, self.name, exc)
             if packet_index not in self.to_send:
                 self.to_send.append(packet_index)
+            self.progress_display.set_status(packet_index, "awaiting_retry")
 
     def _send_finish(self) -> None:
         finish_packet = Packaging_Data.make_status_packet(self.id, 2)
