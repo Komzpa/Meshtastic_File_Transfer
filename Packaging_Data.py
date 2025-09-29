@@ -1,94 +1,117 @@
-import random
+"""Utilities for packaging file transfer payloads.
+
+All helper functions in this module take care of the fiddly byte handling that
+is required to split a file into Meshtastic packets and wrap or unwrap the
+protocol metadata.  Keeping the logic centralised here makes the sender and
+receiver classes significantly easier to read and audit.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Dict, Iterable, Mapping, Sequence, Tuple
 
 
-def split_data(path, packet_size=230):
-    """Splits data into byte arrays and stores them into a dictionary to allow for easy recall of missing packets
-    inputs:
-    -Compressed File name to be sent
-    return:
-    -Dictionary of packets
+PacketDict = Dict[int, bytearray]
+PacketMapping = Mapping[int, bytes]
+
+
+def split_data(path: str | Path, packet_size: int = 230) -> PacketDict:
+    """Split ``path`` into packet-sized bytearrays.
+
+    The return value is a dictionary keyed by packet index.  A dictionary is
+    used because the ordering matters and the data structure mirrors the way
+    the sender and receiver internally track missing packets.
     """
-    packets = []
-    with open(path, "rb") as fi:
-        buf = bytearray(fi.read(packet_size))
-        while len(buf):
-            packets.append(buf)
-            buf = bytearray(fi.read(packet_size))
-    packet_dict = dict(enumerate(packets))
-    return packet_dict
+
+    if packet_size <= 0:
+        raise ValueError("packet_size must be a positive integer")
+
+    packets: PacketDict = {}
+    path = Path(path)
+    with path.open("rb") as source:
+        index = 0
+        while True:
+            chunk = bytearray(source.read(packet_size))
+            if not chunk:
+                break
+            packets[index] = chunk
+            index += 1
+    return packets
 
 
-def package_data(byte_dict: dict, file_id_num: int):
-    """Add file_id byte followed by a packet number byte to the beginning
-    inputs:
-    -byte_dict: dictionary made by split_data
-    return:
-    -file_id_num: of packets
-    """
-    for key in byte_dict.keys():
-        byte_dict[key].insert(0, key)
-        byte_dict[key].insert(0, file_id_num)
-        byte_dict[key] = bytes(byte_dict[key])
-    return byte_dict
+def package_data(byte_dict: PacketDict, file_id_num: int) -> PacketMapping:
+    """Return a new mapping where each packet is prefixed with protocol bytes."""
+
+    packaged: Dict[int, bytes] = {}
+    for packet_num, payload in byte_dict.items():
+        packet = bytearray(payload)
+        packet.insert(0, packet_num)
+        packet.insert(0, file_id_num)
+        packaged[packet_num] = bytes(packet)
+    return packaged
 
 
-def send_packets_dict_to_file(byte_dict: dict, file_name='Sending/packets.txt'):
-    with open(file_name, "wb") as fi:
-        for b_list in byte_dict.values():
-            fi.write(bytes(b_list))
+def send_packets_dict_to_file(byte_dict: PacketMapping, file_name: str = "Sending/packets.txt") -> None:
+    """Persist packet payloads in ``byte_dict`` to ``file_name``."""
+
+    with Path(file_name).open("wb") as destination:
+        for payload in byte_dict.values():
+            destination.write(bytes(payload))
 
 
-def make_initial_req(file_name: str, packet_num, id):
-    return f'!fcom,file:{file_name},packets:{packet_num},id:{id}'
+def make_initial_req(file_name: str, packet_num: int, file_id: int) -> str:
+    """Return the initial request string for a file transfer."""
 
-def decode_initial_req(message):
-    """Returns file_name, packet_num, and file id of request.
+    return f"!fcom,file:{file_name},packets:{packet_num},id:{file_id}"
 
-    The initial request can arrive either as a text string or as raw bytes
-    depending on how the radio firmware delivers the packet.  Normalise the
-    input here so the rest of the code can treat both forms identically.
 
-    ex:!fcom,file:rImages/image-file-compressed.webp,packets:21,id:194"""
+def decode_initial_req(message: bytes | bytearray | str) -> Tuple[str, int, int]:
+    """Extract the file name, packet count and file ID from ``message``."""
+
     if isinstance(message, (bytes, bytearray)):
-        string = message.decode('utf8', errors='ignore')
+        string = message.decode("utf8", errors="ignore")
     else:
         string = str(message)
 
     string = string.strip()
-    fields = string.split(',')
-    ret = {}
+    if not string.startswith("!fcom,"):
+        raise ValueError(f"Unsupported initial request format: {message!r}")
+
+    fields = string.split(",")
+    values = {}
     for field in fields[1:]:
-        field = field.split(':')
-        ret[field[0]] = field[1]
-    file_name = ret['file']
-    f_id = int(ret['id'])
-    num = int(ret['packets'])
-    return file_name, f_id, num
+        try:
+            key, value = field.split(":", 1)
+        except ValueError as exc:
+            raise ValueError(f"Malformed field in initial request: {field!r}") from exc
+        values[key] = value
+
+    try:
+        file_name = values["file"]
+        file_id = int(values["id"])
+        packet_count = int(values["packets"])
+    except KeyError as exc:
+        raise ValueError(f"Missing field in initial request: {exc.args[0]}") from exc
+
+    return file_name, file_id, packet_count
 
 
-def make_status_packet(file_id: int, packet_type: int, opt_data: list = None):
-    """makes communication packets to use for talking about the file transfer state
-    inputs:
-        -file_id: int of what id this is talking about
-        -packet_type: {0: Deny initial Request, 1: Confirm Initial Request, 2: Done Transmitting,
-        3: Need Packets(list Packets after one byte at a time), 4: Received all Packets(finished),
-        5: Packet receipt acknowledgement(list packets after one byte at a time)}
-        -opt_data: List of integers or bytes
-    Returns:
-        - packet = bytes(f, c, o, m, file_num, packet_type, opt data...)
-    """
-    packet = bytearray('fcom'.encode('utf8'))
+def make_status_packet(file_id: int, packet_type: int, opt_data: Sequence[int] | None = None) -> bytearray:
+    """Build a status packet according to the Meshtastic file-transfer protocol."""
+
+    packet = bytearray(b"fcom")
     packet.append(file_id)
     packet.append(packet_type)
-    if opt_data is None:
-        opt_data = []
-    for data in opt_data:
-        packet.append(data)
+    if opt_data:
+        packet.extend(int(value) & 0xFF for value in opt_data)
     return packet
 
 
-def send_packets_list_to_file(byte_list: list, file_name='Sending/radio_packets.txt'):
-    with open(file_name, "wb") as fi:
-        for b_list in byte_list:
-            fi.write(bytes(b_list))
+def send_packets_list_to_file(byte_list: Iterable[bytes], file_name: str = "Sending/radio_packets.txt") -> None:
+    """Persist raw packet payloads from ``byte_list`` to ``file_name``."""
+
+    with Path(file_name).open("wb") as destination:
+        for payload in byte_list:
+            destination.write(bytes(payload))
 
