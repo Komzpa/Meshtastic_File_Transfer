@@ -52,7 +52,7 @@ def test_on_receive_routes_text_messages():
     _reset_queues()
     packet = {
         'decoded': {
-            'portnum': receiver.TRANSFER_PORT_NAME,
+            'portnum': 'TEXT_MESSAGE_APP',
             'text': 'hello world',
             'payload': bytearray(b'hello world'),
         },

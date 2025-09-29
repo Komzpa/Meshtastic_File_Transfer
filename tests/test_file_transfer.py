@@ -217,7 +217,7 @@ def test_transfer_completes_on_open_channel(tmp_path):
     assert receiver_node.receiver is not None and receiver_node.receiver.finished
     assert source_path.read_bytes() == payload
     assert all(
-        portNum == portnums_pb2.TEXT_MESSAGE_APP for _dest, _data, portNum, _wantAck in sender_iface.sent_data
+        portNum == portnums_pb2.WAYPOINT_APP for _dest, _data, portNum, _wantAck in sender_iface.sent_data
     )
 
 
