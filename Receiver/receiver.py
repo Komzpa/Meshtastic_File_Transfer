@@ -48,8 +48,14 @@ def main(interface):
             if Queue:  # Handle binary data
                 name, packet = Queue.pop(0)
                 payload = packet['decoded']['payload']
-                LOGGER.debug('Processing binary packet from %s (%s bytes)', name, len(payload) if payload else 0)
-                manager.new_data_packet(bytearray(payload))
+                from_id = packet.get('fromId')
+                LOGGER.debug(
+                    'Processing binary packet from %s (%s bytes) sender=%s',
+                    name,
+                    len(payload) if payload else 0,
+                    from_id,
+                )
+                manager.new_data_packet(bytearray(payload), from_id=from_id)
             if Text_Queue:  # handle text data
                 name, packet = Text_Queue.pop(0)
                 text = packet['decoded']['text']

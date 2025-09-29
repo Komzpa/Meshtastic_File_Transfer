@@ -117,6 +117,10 @@ class FileTransferReceiver:
         initial_ack = Packaging_Data.make_status_packet(self.id, 1)
         self._send_control_packet(initial_ack, description='initial ack')
 
+    def resend_initial_ack(self):
+        LOGGER.info('Resending initial acknowledgement for %s (%s)', self.name, self.id)
+        self._send_initial_ack()
+
     def _send_control_packet(self, data, description='control'):
         """Sends data over interface to destination"""
         try:
