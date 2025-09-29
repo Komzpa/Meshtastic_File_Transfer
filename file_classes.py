@@ -120,8 +120,12 @@ class FileTransferReceiver:
     def _send_control_packet(self, data, description='control'):
         """Sends data over interface to destination"""
         try:
-            self.interface.sendData(bytes(data), destinationId=self.sending_id,
-                                    portNum=portnums_pb2.IP_TUNNEL_APP, wantAck=False)
+            self.interface.sendData(
+                bytes(data),
+                destinationId=self.sending_id,
+                portNum=portnums_pb2.IP_TUNNEL_APP,
+                wantAck=True,
+            )
             self.last_control_sent = time.time()
             LOGGER.debug('Sent %s packet for %s (%s)', description, self.name, self.id)
         except Exception as exc:
@@ -168,7 +172,11 @@ class FileTransferSender:
         # Sends initial packet
         init_str = Packaging_Data.make_initial_req(self.display_name, len(self.data_dict), self.id)
         try:
-            self.interface.sendText(init_str, destinationId=self.destination_id)
+            self.interface.sendText(
+                init_str,
+                destinationId=self.destination_id,
+                wantAck=True,
+            )
             self.last_activity = time.time()
             LOGGER.info('Sent initial request for %s (%s packets) to %s', self.name, self.packet_num, self.destination_id)
         except Exception as exc:
@@ -292,8 +300,12 @@ class FileTransferSender:
             LOGGER.error('Attempted to send missing packet #%s for %s', packet_index, self.name)
             return
         try:
-            self.interface.sendData(bytes(data), portNum=portnums_pb2.IP_TUNNEL_APP,
-                                    destinationId=self.destination_id, wantAck=False)
+            self.interface.sendData(
+                bytes(data),
+                portNum=portnums_pb2.IP_TUNNEL_APP,
+                destinationId=self.destination_id,
+                wantAck=True,
+            )
             sent_time = time.time()
             self.pending_packets[packet_index] = sent_time
             self.last_send = sent_time
@@ -308,8 +320,12 @@ class FileTransferSender:
     def _send_finish(self):
         finish_packet = Packaging_Data.make_status_packet(self.id, 2)
         try:
-            self.interface.sendData(bytes(finish_packet), portNum=portnums_pb2.IP_TUNNEL_APP,
-                                    destinationId=self.destination_id, wantAck=False)
+            self.interface.sendData(
+                bytes(finish_packet),
+                portNum=portnums_pb2.IP_TUNNEL_APP,
+                destinationId=self.destination_id,
+                wantAck=True,
+            )
             self.finish_sent = True
             self.last_send = time.time()
             self.last_activity = self.last_send
