@@ -46,7 +46,8 @@ CORE_PORTNUMS = {
     'TRACEROUTE_APP',
 }
 
-TRANSFER_PORT_NAME = 'TEXT_MESSAGE_APP'
+TRANSFER_PORT_NAME = 'WAYPOINT_APP'
+LEGACY_TRANSFER_PORT_NAMES = {TRANSFER_PORT_NAME, 'TEXT_MESSAGE_APP'}
 
 
 def main(interface):
@@ -140,7 +141,7 @@ def on_receive(packet, interface): # called when a packet arrives
     )
     decoded = packet.get('decoded', {})
     portnum = decoded.get('portnum')
-    if portnum == TRANSFER_PORT_NAME and 'payload' in decoded:
+    if portnum in LEGACY_TRANSFER_PORT_NAMES and 'payload' in decoded:
         Queue.append((interface.getShortName(), packet))
     elif portnum in CORE_PORTNUMS and 'text' in decoded:
         Text_Queue.append((interface.getShortName(), packet))
