@@ -59,6 +59,17 @@ class FileTransManager:
         """Return True if the payload contains an inline initial request."""
         return len(packet) > 6 and packet[0] == ord('!') and packet[1:6] == b'fcom,'
 
+    def _lookup_short_name(self, node_id):
+        """Best effort lookup of a node's short name for logging."""
+        if not node_id:
+            return 'Unknown'
+
+        nodes = getattr(self.interface, 'nodes', {}) or {}
+        node_info = nodes.get(node_id, {})
+        user_info = node_info.get('user', {}) if isinstance(node_info, dict) else {}
+        short_name = user_info.get('shortName')
+        return short_name or node_id
+
     def new_data_packet(self, packet, from_id=None):
         """Called to process new data or control packet"""
         if not packet:
@@ -103,8 +114,26 @@ class FileTransManager:
             LOGGER.debug('Routing data packet #%s from %s to receiver %s', packet[1], from_id, key)
             transfer.add_packet(packet)
         else:
-            print(f'something went Wrong: {packet}')
-            LOGGER.error('Received data packet for unknown transfer id %s from %s: %s', packet[0], from_id, packet)
+            try:
+                text_payload = packet.decode('utf8')
+            except UnicodeDecodeError:
+                text_payload = packet.decode('utf8', errors='replace')
+
+            if text_payload and any(ch.isprintable() for ch in text_payload):
+                sender_name = self._lookup_short_name(from_id)
+                LOGGER.info(
+                    'Received non-transfer text payload from %s (%s): %s',
+                    sender_name,
+                    from_id,
+                    text_payload,
+                )
+            else:
+                LOGGER.debug(
+                    'Ignoring payload for unknown transfer id %s from %s: %s',
+                    packet[0] if packet else 'unknown',
+                    from_id,
+                    packet,
+                )
 
     def new_req_packet(self, initial_req, sending_id, timeout=100):
         """Called to make new file_receiving packet based on a request packet"""
