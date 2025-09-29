@@ -146,7 +146,10 @@ class FileTransferSender:
         self.retry_timeout = max(self.delay * 2, 3)
         self.window_size = max(1, min(5, len(self.data_dict)))
         self.packet_num = len(self.data_dict)
-        self.last_send = time.time()
+        # Track when the last packet was transmitted so we can throttle the
+        # send rate. Initialise to zero so the very first packet is allowed to
+        # go out immediately.
+        self.last_send = 0
         self.last_activity = time.time()
         # Modes- 0: Waiting for initial ack, 2: Sending Data, 3: Waiting for completion confirmation
         self.mode = 0
@@ -259,6 +262,16 @@ class FileTransferSender:
 
     def _fill_window(self):
         while self.to_send and len(self.pending_packets) < self.window_size and not self.kill:
+            now = time.time()
+            if self.last_send and now - self.last_send < self.delay:
+                remaining = self.delay - (now - self.last_send)
+                LOGGER.debug(
+                    'Delaying send of next packet for %s (%s); %.2fs remaining in rate limit',
+                    self.name,
+                    self.id,
+                    max(0, remaining),
+                )
+                break
             packet_index = self.to_send.pop(0)
             if packet_index in self.acknowledged_packets:
                 continue

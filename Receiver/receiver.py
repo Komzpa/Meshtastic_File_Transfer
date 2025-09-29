@@ -53,8 +53,7 @@ def main(interface):
             if Text_Queue:  # handle text data
                 name, packet = Text_Queue.pop(0)
                 text = packet['decoded']['text']
-                print(f'Text Received: {text}')
-                LOGGER.debug('Received text from %s: %s', name, text)
+                LOGGER.info('Text received from %s: %s', name, text)
                 if text[0:5] == '!fcom':
                     LOGGER.info('Received transfer request %s from %s', text, packet['fromId'])
                     manager.new_req_packet(text, packet['fromId'], timeout=time_out)
