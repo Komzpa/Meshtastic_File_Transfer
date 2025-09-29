@@ -34,6 +34,7 @@ if TEST_ROOT not in sys.path:
 
 import Packaging_Data
 import file_classes
+from File_Class_Manager import FileTransManager
 from meshtastic import portnums_pb2
 
 
@@ -76,6 +77,18 @@ class FakeInterface:
     def sendText(self, text, destinationId, wantAck=False):
         self.sent_texts.append((destinationId, text))
         self.network.send_text(self.node_id, destinationId, text)
+
+
+class DummyInterface:
+    def __init__(self):
+        self.sent_data = []
+        self.sent_text = []
+
+    def sendData(self, data, destinationId=None, portNum=None, wantAck=False):
+        self.sent_data.append((destinationId, bytes(data), portNum, wantAck))
+
+    def sendText(self, text, destinationId=None, wantAck=False):
+        self.sent_text.append((destinationId, text, wantAck))
 
 
 class FakeNetwork:
@@ -321,4 +334,16 @@ def test_transfer_completes_with_link_delay(tmp_path):
     assert sender.finished
     assert receiver_node.receiver is not None and receiver_node.receiver.finished
     assert source_path.read_bytes() == payload
+
+
+def test_manager_handles_initial_request_in_payload():
+    interface = DummyInterface()
+    manager = FileTransManager(interface, auto_restart=True)
+    request = Packaging_Data.make_initial_req('sample.bin', 4, 55).encode('utf8')
+
+    with patch('file_classes.tqdm.tqdm', DummyProgressBar):
+        manager.new_data_packet(bytearray(request), from_id='peer')
+
+    key = manager._make_key('recv', 'peer', 55)
+    assert key in manager.transfer_objects
 

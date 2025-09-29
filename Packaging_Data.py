@@ -41,9 +41,20 @@ def send_packets_dict_to_file(byte_dict: dict, file_name='Sending/packets.txt'):
 def make_initial_req(file_name: str, packet_num, id):
     return f'!fcom,file:{file_name},packets:{packet_num},id:{id}'
 
-def decode_initial_req(string: str):
-    """Returns file_name, packet_num, and file id of request
+def decode_initial_req(message):
+    """Returns file_name, packet_num, and file id of request.
+
+    The initial request can arrive either as a text string or as raw bytes
+    depending on how the radio firmware delivers the packet.  Normalise the
+    input here so the rest of the code can treat both forms identically.
+
     ex:!fcom,file:rImages/image-file-compressed.webp,packets:21,id:194"""
+    if isinstance(message, (bytes, bytearray)):
+        string = message.decode('utf8', errors='ignore')
+    else:
+        string = str(message)
+
+    string = string.strip()
     fields = string.split(',')
     ret = {}
     for field in fields[1:]:

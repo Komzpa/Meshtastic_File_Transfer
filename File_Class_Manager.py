@@ -55,10 +55,27 @@ class FileTransManager:
                 self.done = True
                 LOGGER.debug('No active transfers remaining')
 
+    def _is_embedded_initial_request(self, packet: bytearray) -> bool:
+        """Return True if the payload contains an inline initial request."""
+        return len(packet) > 6 and packet[0] == ord('!') and packet[1:6] == b'fcom,'
+
     def new_data_packet(self, packet, from_id=None):
         """Called to process new data or control packet"""
         if not packet:
             LOGGER.warning('Received empty packet from %s, ignoring', from_id)
+            return
+
+        if self._is_embedded_initial_request(packet):
+            try:
+                request = packet.decode('utf8')
+            except UnicodeDecodeError:
+                request = packet.decode('utf8', errors='ignore')
+            LOGGER.info(
+                'Detected embedded initial request from %s: %s',
+                from_id,
+                request,
+            )
+            self.new_req_packet(request, from_id)
             return
 
         control_prefix = bytearray('f'.encode('utf8'))[0]
@@ -91,7 +108,16 @@ class FileTransManager:
 
     def new_req_packet(self, initial_req, sending_id, timeout=100):
         """Called to make new file_receiving packet based on a request packet"""
-        file_name, f_id, num = decode_initial_req(initial_req)
+        try:
+            file_name, f_id, num = decode_initial_req(initial_req)
+        except (ValueError, KeyError) as exc:
+            LOGGER.warning(
+                'Failed to decode initial request from %s: %s (%s)',
+                sending_id,
+                initial_req,
+                exc,
+            )
+            return
         LOGGER.info('New transfer request %s id=%s packets=%s from %s', file_name, f_id, num, sending_id)
         key = self._make_key('recv', sending_id, f_id)
         existing = self.transfer_objects.get(key)
