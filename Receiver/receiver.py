@@ -78,7 +78,7 @@ def main(interface):
                 name, packet = Text_Queue.pop(0)
                 text = packet['decoded']['text']
                 LOGGER.info('Text received from %s: %s', name, text)
-                if text[0:5] == '!fcom':
+                if text.startswith('!fcom'):
                     LOGGER.info('Received transfer request %s from %s', text, packet['fromId'])
                     manager.new_req_packet(text, packet['fromId'], timeout=time_out)
         interface.close()
@@ -97,10 +97,11 @@ def on_receive(packet, interface): # called when a packet arrives
     )
     decoded = packet.get('decoded', {})
     portnum = decoded.get('portnum')
-    if portnum == TRANSFER_PORT_NAME and 'payload' in decoded:
-        Queue.append((interface.getShortName(), packet))
-    elif portnum in CORE_PORTNUMS and 'text' in decoded:
+    text = decoded.get('text') if portnum in CORE_PORTNUMS else None
+    if portnum in CORE_PORTNUMS and text is not None:
         Text_Queue.append((interface.getShortName(), packet))
+    elif portnum == TRANSFER_PORT_NAME and 'payload' in decoded:
+        Queue.append((interface.getShortName(), packet))
 
 
 if __name__ == '__main__':
