@@ -7,6 +7,10 @@ import tqdm
 
 LOGGER = logging.getLogger(__name__)
 
+# File transfer traffic now uses the same core port number as the initial
+# request message so radios treat the packets as standard application data.
+TRANSFER_PORTNUM = portnums_pb2.TEXT_MESSAGE_APP
+
 class FileTransferReceiver:
     """Class used to store and handle incoming file packets and should be created when the first request packet is
     acknowledged. Added to as the packets come in. Checked when the last packet number arrives or when a timeout is
@@ -127,7 +131,7 @@ class FileTransferReceiver:
             self.interface.sendData(
                 bytes(data),
                 destinationId=self.sending_id,
-                portNum=portnums_pb2.IP_TUNNEL_APP,
+                portNum=TRANSFER_PORTNUM,
                 wantAck=True,
             )
             self.last_control_sent = time.time()
@@ -306,7 +310,7 @@ class FileTransferSender:
         try:
             self.interface.sendData(
                 bytes(data),
-                portNum=portnums_pb2.IP_TUNNEL_APP,
+                portNum=TRANSFER_PORTNUM,
                 destinationId=self.destination_id,
                 wantAck=True,
             )
@@ -326,7 +330,7 @@ class FileTransferSender:
         try:
             self.interface.sendData(
                 bytes(finish_packet),
-                portNum=portnums_pb2.IP_TUNNEL_APP,
+                portNum=TRANSFER_PORTNUM,
                 destinationId=self.destination_id,
                 wantAck=True,
             )

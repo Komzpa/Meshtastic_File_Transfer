@@ -10,7 +10,18 @@ from unittest.mock import patch
 if "meshtastic" not in sys.modules:
     meshtastic_module = types.ModuleType("meshtastic")
     portnums_module = types.ModuleType("meshtastic.portnums_pb2")
-    portnums_module.IP_TUNNEL_APP = 1
+    portnums_module.TEXT_MESSAGE_APP = 1
+    portnums_module.TEXT_MESSAGE_COMPRESSED_APP = 2
+    portnums_module.POSITION_APP = 3
+    portnums_module.NODEINFO_APP = 4
+    portnums_module.ROUTING_APP = 5
+    portnums_module.TELEMETRY_APP = 6
+    portnums_module.ADMIN_APP = 7
+    portnums_module.ALERT_APP = 8
+    portnums_module.KEY_VERIFICATION_APP = 9
+    portnums_module.WAYPOINT_APP = 10
+    portnums_module.STORE_FORWARD_APP = 11
+    portnums_module.TRACEROUTE_APP = 12
     meshtastic_module.portnums_pb2 = portnums_module
     sys.modules["meshtastic"] = meshtastic_module
     sys.modules["meshtastic.portnums_pb2"] = portnums_module
@@ -23,6 +34,7 @@ if TEST_ROOT not in sys.path:
 
 import Packaging_Data
 import file_classes
+from meshtastic import portnums_pb2
 
 
 class FakeTime:
@@ -55,9 +67,10 @@ class FakeInterface:
         self.node_id = node_id
         self.network = network
         self.sent_texts = []
+        self.sent_data = []
 
     def sendData(self, data, destinationId, portNum=None, wantAck=False):
-        del portNum, wantAck  # Unused in tests
+        self.sent_data.append((destinationId, data, portNum, wantAck))
         self.network.send_data(self.node_id, destinationId, data)
 
     def sendText(self, text, destinationId, wantAck=False):
@@ -190,6 +203,9 @@ def test_transfer_completes_on_open_channel(tmp_path):
     assert sender.finished
     assert receiver_node.receiver is not None and receiver_node.receiver.finished
     assert source_path.read_bytes() == payload
+    assert all(
+        portNum == portnums_pb2.TEXT_MESSAGE_APP for _dest, _data, portNum, _wantAck in sender_iface.sent_data
+    )
 
 
 def test_initial_request_uses_basename(tmp_path):
