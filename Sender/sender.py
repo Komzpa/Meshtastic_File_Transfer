@@ -106,10 +106,10 @@ if __name__ == '__main__':
     if ports:
         for port in ports:
             try:
-                interface = SerialInterface(devPath='/dev/cu.usbserial-54760041581')
-                print(f'connected to {interface.getShortName()}')
+                interface = SerialInterface(devPath=port)
+                print(f'connected to {interface.getShortName()} on {port}')
                 break
-            except (BlockingIOError, SerialException) as e:
+            except (BlockingIOError, SerialException):
                 pass
     if interface:
         pub.subscribe(on_receive, "meshtastic.receive")

@@ -44,10 +44,13 @@ class FileTransManager:
 
     def new_data_packet(self, packet):
         """Called to process new data packet"""
-        if packet[0] == bytearray('f'.encode('utf8'))[0] and packet[4] in self.transfer_objects:
-            # print(f'com packet: {packet}')
+        if packet[0] == bytearray('f'.encode('utf8'))[0]:
             f_id = packet[4]
-            self.transfer_objects[f_id].manage_com_packet(packet)
+            transfer = self.transfer_objects.get(f_id)
+            if transfer:
+                transfer.manage_com_packet(packet)
+            else:
+                print(f'Received control packet for unknown transfer id {f_id}, ignoring')
         elif packet[0] in self.transfer_objects.keys():
             # print(f'file packet received for {int(packet[0])}: {packet}')
             self.transfer_objects[packet[0]].add_packet(packet)
