@@ -55,12 +55,13 @@ def decode_initial_req(string: str):
     return file_name, f_id, num
 
 
-def make_status_packet(file_id: int, packet_type: int, opt_data: list = []):
+def make_status_packet(file_id: int, packet_type: int, opt_data: list = None):
     """makes communication packets to use for talking about the file transfer state
     inputs:
         -file_id: int of what id this is talking about
         -packet_type: {0: Deny initial Request, 1: Confirm Initial Request, 2: Done Transmitting,
-        3: Need Packets(list Packets after one byte at a time), 4: Received all Packets(finished)}
+        3: Need Packets(list Packets after one byte at a time), 4: Received all Packets(finished),
+        5: Packet receipt acknowledgement(list packets after one byte at a time)}
         -opt_data: List of integers or bytes
     Returns:
         - packet = bytes(f, c, o, m, file_num, packet_type, opt data...)
@@ -68,6 +69,8 @@ def make_status_packet(file_id: int, packet_type: int, opt_data: list = []):
     packet = bytearray('fcom'.encode('utf8'))
     packet.append(file_id)
     packet.append(packet_type)
+    if opt_data is None:
+        opt_data = []
     for data in opt_data:
         packet.append(data)
     return packet
